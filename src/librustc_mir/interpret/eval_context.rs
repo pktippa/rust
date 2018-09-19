@@ -25,6 +25,7 @@ use rustc::ty::query::TyCtxtAt;
 use rustc_data_structures::indexed_vec::IndexVec;
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher, StableHasherResult};
 use rustc::mir::interpret::{
+    ErrorHandled,
     GlobalId, Scalar, FrameInfo, AllocId,
     EvalResult, EvalErrorKind,
     ScalarMaybeUndef,
@@ -601,8 +602,12 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M
         } else {
             self.param_env
         };
-        self.tcx.const_eval(param_env.and(gid))
-            .map_err(|err| EvalErrorKind::ReferencedConstant(err).into())
+        self.tcx.const_eval(param_env.and(gid)).map_err(|err| {
+            match err {
+                ErrorHandled::Reported => EvalErrorKind::ReferencedConstant.into(),
+                ErrorHandled::TooGeneric => EvalErrorKind::TooGeneric.into(),
+            }
+        })
     }
 
     #[inline(always)]
@@ -691,7 +696,7 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M
         }
     }
 
-    pub fn generate_stacktrace(&self, explicit_span: Option<Span>) -> (Vec<FrameInfo>, Span) {
+    pub fn generate_stacktrace(&self, explicit_span: Option<Span>) -> Vec<FrameInfo> {
         let mut last_span = None;
         let mut frames = Vec::new();
         // skip 1 because the last frame is just the environment of the constant
@@ -728,7 +733,7 @@ impl<'a, 'mir, 'tcx: 'mir, M: Machine<'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M
             frames.push(FrameInfo { span, location, lint_root });
         }
         trace!("generate stacktrace: {:#?}, {:?}", frames, explicit_span);
-        (frames, self.tcx.span)
+        frames
     }
 
     #[inline(always)]

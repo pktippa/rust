@@ -437,7 +437,7 @@ impl<'a, 'mir, 'tcx, M: Machine<'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> {
         };
 
         let ty = self.tcx.mk_unit(); // return type is ()
-        let dest = PlaceTy::null(&self, self.layout_of(ty)?);
+        let dest = PlaceTy::null(self.layout_of(ty)?, &self);
 
         self.eval_fn_call(
             instance,

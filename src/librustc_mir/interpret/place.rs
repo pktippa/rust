@@ -124,6 +124,12 @@ impl MemPlace {
         }
     }
 
+    /// Produces a Place that will error if attempted to be read from or written to
+    #[inline(always)]
+    pub fn null(cx: impl HasDataLayout) -> Self {
+        Self::from_scalar_ptr(Scalar::ptr_null(cx), Align::from_bytes(1, 1).unwrap())
+    }
+
     #[inline(always)]
     pub fn from_ptr(ptr: Pointer, align: Align) -> Self {
         Self::from_scalar_ptr(ptr.into(), align)
@@ -146,6 +152,7 @@ impl MemPlace {
 
     /// Turn a mplace into a (thin or fat) pointer, as a reference, pointing to the same space.
     /// This is the inverse of `ref_to_mplace`.
+    #[inline]
     pub fn to_ref(self) -> Value {
         // We ignore the alignment of the place here -- special handling for packed structs ends
         // at the `&` operator.
@@ -157,6 +164,12 @@ impl MemPlace {
 }
 
 impl<'tcx> MPlaceTy<'tcx> {
+    /// Produces a Place that will error if attempted to be read from or written to
+    #[inline]
+    pub fn null(layout: TyLayout<'tcx>, cx: impl HasDataLayout) -> Self {
+        MPlaceTy { mplace: MemPlace::from_scalar_ptr(Scalar::ptr_null(cx), layout.align), layout }
+    }
+
     #[inline]
     fn from_aligned_ptr(ptr: Pointer, layout: TyLayout<'tcx>) -> Self {
         MPlaceTy { mplace: MemPlace::from_ptr(ptr, layout.align), layout }
@@ -207,17 +220,17 @@ impl<'tcx> OpTy<'tcx> {
 
 impl<'tcx> Place {
     /// Produces a Place that will error if attempted to be read from or written to
-    #[inline]
+    #[inline(always)]
     pub fn null(cx: impl HasDataLayout) -> Self {
-        Self::from_scalar_ptr(Scalar::ptr_null(cx), Align::from_bytes(1, 1).unwrap())
+        Place::Ptr(MemPlace::null(cx))
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn from_scalar_ptr(ptr: Scalar, align: Align) -> Self {
         Place::Ptr(MemPlace::from_scalar_ptr(ptr, align))
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn from_ptr(ptr: Pointer, align: Align) -> Self {
         Place::Ptr(MemPlace::from_ptr(ptr, align))
     }
@@ -245,7 +258,7 @@ impl<'tcx> Place {
 impl<'tcx> PlaceTy<'tcx> {
     /// Produces a Place that will error if attempted to be read from or written to
     #[inline]
-    pub fn null(cx: impl HasDataLayout, layout: TyLayout<'tcx>) -> Self {
+    pub fn null(layout: TyLayout<'tcx>, cx: impl HasDataLayout) -> Self {
         PlaceTy { place: Place::from_scalar_ptr(Scalar::ptr_null(cx), layout.align), layout }
     }
 
@@ -711,9 +724,14 @@ impl<'a, 'mir, 'tcx, M: Machine<'mir, 'tcx>> EvalContext<'a, 'mir, 'tcx, M> {
         layout: TyLayout<'tcx>,
         kind: MemoryKind<M::MemoryKinds>,
     ) -> EvalResult<'tcx, MPlaceTy<'tcx>> {
-        assert!(!layout.is_unsized(), "cannot alloc memory for unsized type");
-        let ptr = self.memory.allocate(layout.size, layout.align, kind)?;
-        Ok(MPlaceTy::from_aligned_ptr(ptr, layout))
+        if layout.is_unsized() {
+            assert!(self.tcx.features().unsized_locals, "cannot alloc memory for unsized type");
+            // FIXME: What should we do here?
+            Ok(MPlaceTy::null(layout, &self))
+        } else {
+            let ptr = self.memory.allocate(layout.size, layout.align, kind)?;
+            Ok(MPlaceTy::from_aligned_ptr(ptr, layout))
+        }
     }
 
     pub fn write_discriminant_index(

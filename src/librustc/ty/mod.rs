@@ -27,7 +27,7 @@ use middle::lang_items::{FnTraitLangItem, FnMutTraitLangItem, FnOnceTraitLangIte
 use middle::privacy::AccessLevels;
 use middle::resolve_lifetime::ObjectLifetimeDefault;
 use mir::Mir;
-use mir::interpret::GlobalId;
+use mir::interpret::{GlobalId, ErrorHandled};
 use mir::GeneratorLayout;
 use session::CrateDisambiguator;
 use traits::{self, Reveal};
@@ -2172,11 +2172,7 @@ impl<'a, 'gcx, 'tcx> AdtDef {
                     None
                 }
             }
-            Err(err) => {
-                err.report_as_error(
-                    tcx.at(tcx.def_span(expr_did)),
-                    "could not evaluate enum discriminant",
-                );
+            Err(ErrorHandled::Reported) => {
                 if !expr_did.is_local() {
                     span_bug!(tcx.def_span(expr_did),
                         "variant discriminant evaluation succeeded \
@@ -2184,6 +2180,10 @@ impl<'a, 'gcx, 'tcx> AdtDef {
                 }
                 None
             }
+            Err(ErrorHandled::TooGeneric) => span_bug!(
+                tcx.def_span(expr_did),
+                "enum discriminant depends on generic arguments",
+            ),
         }
     }
 
